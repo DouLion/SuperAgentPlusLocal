@@ -109,7 +109,8 @@ function protocolText(role, init) {
     common.push(
       '规则：',
       '- 只读 direction.md、briefs/、notes/；不要读 work/、日志、diff、复现。',
-      '- 写 notes/note-<id>.md；必要时更新 direction.md。',
+      '- 用 /sap-notes 看未决 brief；写 notes/note-<id>.md；必要时更新 direction.md。',
+      '- 用 /sap-doctor 做文件级检查；它不证明方向正确或上下文未被污染。',
       '- brief 夹带日志/diff/stack trace 时：退回，要求一页方向问题。',
       '- 没有审批；不要写 approve/reject。note 是方向指导，不是授权。',
       '- 当前会话被污染时：运行 /sap-clever 生成排污包，然后新建会话并 /sap-role chief。',
@@ -118,10 +119,10 @@ function protocolText(role, init) {
     common.push(
       '规则：',
       '- 先读 direction.md。',
-      '- 实现细节：自己做，写 work/<session>/log.md；不要打扰总工。',
+      '- 实现细节：自己做，用 /sap-worklog 记录到 work/<session>/log.md；不要打扰总工。',
       '- 方向问题：照 templates/brief.md 写 briefs/brief-<id>.md；一页，不含日志/diff/stack trace；继续做不冲突的部分。',
       '- 读 notes/ 的方向判断；采纳/调整/在 work/<session>/dissent.md 提异议；不要等批准。',
-      '- 不要把 work/ 的日志或对话贴进 brief 或总工会话。',
+      '- 用 /sap-brief-status 标记 resolved；不要把 work/ 的日志或对话贴进 brief 或总工会话。',
     )
   }
   if (init && init.phase !== 'done') {
