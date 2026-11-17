@@ -8,7 +8,7 @@
 
 ## 功能
 
-- **SAP 操作条**：输入框上方集中完成角色切换、初始化/重新共识、写 Brief/Note、工作日志、状态、医生、总工接管、导出/导入、排污；每次操作都在面板中显示成功或失败回执。
+- **SAP 操作条**：输入框上方集中完成角色切换、初始化/重新共识、写 Brief/Note、工作日志、状态、医生、总工接管、导出/导入、排污；操作按钮始终可见，未初始化时点击会明确提示先选择总工并初始化。
 - **总工状态**：`.sap.local/chief.json` 记录唯一总工；总工离线/过期时角色条提示，`/sap-chief status` 查看、`/sap-chief takeover` 接管。
 - **`/sap-init`**：多轮问答初始化，区分新项目 / 已有项目；`reinit` 用于旧项目重新共识，归档旧方向并保留 briefs/notes/work。
 - **`/sap-brief` / `/sap-note`**：一页 brief 与方向 note；支持 `from <path>` 导入、`open/resolved` 状态。
@@ -99,7 +99,7 @@
 node --test test/*.test.js
 ```
 
-当前版本：`0.5.0`。
+当前版本：`0.5.1`。
 
 ## License
 

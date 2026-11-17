@@ -18,8 +18,6 @@ window.__ModuleLoader__.load({
       { id: 'worker', label: '工作' },
     ]
     const ACTIONS = [
-      { id: 'init', label: '初始化' },
-      { id: 'reinit', label: '重新共识' },
       { id: 'brief', label: '写 Brief' },
       { id: 'note', label: '写 Note' },
       { id: 'worklog', label: '工作日志' },
@@ -187,6 +185,11 @@ window.__ModuleLoader__.load({
       })
 
       const openPanel = async (name) => {
+        if (!initialized && !['init', 'status'].includes(name)) {
+          setNotice('尚未初始化；请先选择“总工”并点击“初始化”。')
+          setDiag('尚未初始化')
+          return
+        }
         setPanel(name)
         setNotice('')
         setDiag('')
@@ -460,19 +463,24 @@ window.__ModuleLoader__.load({
       },
         h('div', { style: { width: '100%', display: 'flex', flexDirection: 'column', gap: 6 } },
           h('div', { style: bar, title: 'SAP 单机：角色 + 操作台' },
-            h('span', { style: label }, 'SAP'),
+            h('span', { style: label }, 'SAP v0.5.1'),
             ...ROLES.map((item) => h('button', {
               key: item.id, type: 'button', style: button(role === item.id, busy),
               disabled: busy, onClick: () => pickRole(item.id),
             }, item.label)),
-            ...(initialized ? ACTIONS.filter((a) => a.id !== 'init').map((item) => h('button', {
+            initialized
+              ? h('button', {
+                  key: 'reinit', type: 'button', style: button(panel === 'reinit', busy),
+                  disabled: busy, onClick: () => openPanel('reinit'),
+                }, '重新共识')
+              : h('button', {
+                  key: 'init', type: 'button', style: button(panel === 'init', busy),
+                  disabled: busy, onClick: () => openPanel('init'),
+                }, '初始化'),
+            ...ACTIONS.map((item) => h('button', {
               key: item.id, type: 'button', style: button(panel === item.id, busy),
               disabled: busy, onClick: () => openPanel(item.id),
-            }, item.label)) : []),
-            ...(!initialized && role === 'chief' ? [h('button', {
-              key: 'init', type: 'button', style: button(panel === 'init', busy),
-              disabled: busy, onClick: () => openPanel('init'),
-            }, '初始化')] : []),
+            }, item.label)),
             h('span', { style: { marginLeft: 'auto', opacity: 0.6, fontSize: 10, whiteSpace: 'nowrap', color: C.muted } }, hint),
           ),
           renderPanel(),

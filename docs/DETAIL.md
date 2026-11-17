@@ -32,7 +32,8 @@
 
 - 默认 **无角色**：该会话不注入协议、不参与 SAP。
 - 角色只通过操作条按钮切换；不提供 `/sap-role` 命令。
-- 未初始化时先选 **总工**，才会出现“初始化”按钮；worker/无角色不能初始化。
+- 操作按钮始终显示；未初始化时点击 Brief/Note 等会提示“先选择总工并初始化”，不会静默。
+- 未初始化时先选 **总工** 再点“初始化”；worker/无角色点初始化会在面板看到拒绝原因。
 - 点击操作按钮打开面板，表单提交后**必须在面板中显示成功或失败回执**；失败显示 host 返回的 error。
 - 面板覆盖：初始化/重新共识、写 Brief、写 Note、工作日志、状态、医生、总工接管、导出/导入、排污。
 - 数据通路：`GET /sap-local/overview`、`GET/PUT /sap-local/role`、`POST /sap-local/init-*`、`POST /sap-local/brief`、`POST /sap-local/note`、`POST /sap-local/worklog`、`POST /sap-local/chief`、`POST /sap-local/export`、`POST /sap-local/import`、`POST /sap-local/cleanse`。
