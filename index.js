@@ -3,7 +3,9 @@ import fs from 'node:fs/promises'
 import {
   answerInit,
   appendWorkLog,
+  chiefStatus,
   cleanse,
+  clearChief,
   createBrief,
   createNote,
   doctor,
@@ -18,13 +20,16 @@ import {
   listBriefs,
   listNotes,
   nowIso,
+  readChief,
   readJson,
   readText,
   setBriefStatus,
+  setChief,
   setRole,
   sapPaths,
   startInit,
   status,
+  touchChief,
   writeJson,
 } from './lib/sap.js'
 
@@ -111,6 +116,7 @@ function protocolText(role, init) {
       '- 只读 direction.md、briefs/、notes/；不要读 work/、日志、diff、复现。',
       '- 用 /sap-notes 看未决 brief；写 notes/note-<id>.md；必要时更新 direction.md。',
       '- 用 /sap-doctor 做文件级检查；它不证明方向正确或上下文未被污染。',
+      '- 用 /sap-chief 报告总工状态；你是在线总工时保持会话存活。',
       '- brief 夹带日志/diff/stack trace 时：退回，要求一页方向问题。',
       '- 没有审批；不要写 approve/reject。note 是方向指导，不是授权。',
       '- 当前会话被污染时：运行 /sap-clever 生成排污包，然后新建会话并在 SAP 角色条选择“总工”。',
@@ -123,6 +129,7 @@ function protocolText(role, init) {
       '- 方向问题：照 templates/brief.md 写 briefs/brief-<id>.md；一页，不含日志/diff/stack trace；继续做不冲突的部分。',
       '- 读 notes/ 的方向判断；采纳/调整/在 work/<session>/dissent.md 提异议；不要等批准。',
       '- 用 /sap-brief-status 标记 resolved；不要把 work/ 的日志或对话贴进 brief 或总工会话。',
+      '- 用 /sap-chief 查看总工是否在线；总工离线时提醒用户拉起，不要自行改方向。',
     )
   }
   if (init && init.phase !== 'done') {
@@ -188,6 +195,28 @@ async function rootForSession(context, roots, sessionId, cwd, { strict = false }
   return findRoot(process.cwd())
 }
 
+function liveAgentIds(context) {
+  const registry = serviceFromCtx(context, 'agents')
+  if (!registry || typeof registry.list !== 'function') return []
+  try {
+    return registry.list().map((agent) => String(agent?.id))
+  } catch {
+    return []
+  }
+}
+
+function chiefOptions(context) {
+  return { liveIds: liveAgentIds(context), hostPid: process.pid }
+}
+
+async function refreshChief(context, root, agent) {
+  if (!root || !agent) return
+  const record = await readChief(root)
+  if (record?.session_id === String(agent.id)) {
+    await touchChief(root, record.session_id, chiefOptions(context))
+  }
+}
+
 export function apply(ctx, _config = {}) {
   const disposers = []
   const protocolDisposers = new Map()
@@ -202,6 +231,7 @@ export function apply(ctx, _config = {}) {
       if (!(await exists(path.join(root, '.sap.local')))) return
       sessionRoots.set(agent.id, root)
       sessionAgents.set(agent.id, agent)
+      await refreshChief(ctx, root, agent)
       const role = await getRole(root, agent.id)
       const disposeOld = () => {
         const old = protocolDisposers.get(agent)
@@ -278,7 +308,7 @@ export function apply(ctx, _config = {}) {
           return commandText(formatInitStatus(s))
         }
         if (action === 'finalize') {
-          const result = await finalizeInit(root, invocation.agent.id)
+          const result = await finalizeInit(root, invocation.agent.id, chiefOptions(ctx))
           await refreshProtocol(invocation.agent, true)
           return commandText([
             '初始化完成。',
@@ -311,6 +341,41 @@ export function apply(ctx, _config = {}) {
         const started = await startInit(root, invocation.agent.id)
         await refreshProtocol(invocation.agent, true)
         return commandText(formatInitStatus(await initStatus(root)))
+      } catch (error) {
+        return commandError(error)
+      }
+    },
+  })
+
+  cmd({
+    name: 'sap-chief',
+    description: '查看总工状态或接管总工：status | takeover',
+    input: { hint: 'status | takeover' },
+    recordInput: false,
+    async handler(invocation) {
+      try {
+        const args = splitArgs(invocation.rawInput)
+        const action = args[0] || 'status'
+        if (!['status', 'takeover', 'revive'].includes(action)) return commandError('用法：/sap-chief status | takeover')
+        const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
+        if (!(await exists(path.join(root, '.sap.local')))) return commandError('尚未初始化；请先选择总工并初始化。')
+        const chief = chiefStatus(await readChief(root), liveAgentIds(ctx), process.pid)
+        if (action === 'status') {
+          const lines = [
+            `总工状态：${chief.status}`,
+            chief.session_id ? `总工会话：${chief.session_id}` : null,
+            chief.last_seen_at ? `最近心跳：${chief.last_seen_at}` : null,
+            chief.age_ms !== null ? `距今：${Math.round(chief.age_ms / 1000)}s` : null,
+          ].filter(Boolean)
+          if (chief.status === 'offline' || chief.status === 'stale') {
+            lines.push('总工不在线；可在当前会话运行 /sap-chief takeover，或在 SAP 角色条选择“总工”接管。')
+          }
+          return commandText(lines.join('\n'))
+        }
+        await setChief(root, invocation.agent.id, chiefOptions(ctx))
+        await refreshProtocol(invocation.agent, true)
+        return commandText('已接管总工方向会话；当前会话角色为 chief。')
       } catch (error) {
         return commandError(error)
       }
@@ -414,7 +479,7 @@ export function apply(ctx, _config = {}) {
       try {
         const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
         const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
-        const result = await doctor(root, invocation.agent.id)
+        const result = await doctor(root, invocation.agent.id, chiefOptions(ctx))
         const lines = [
           `SAP doctor：${result.ok ? '通过' : '有警告'}`,
           ...result.checks.map((c) => `${c.ok ? '✓' : '✗'} ${c.message}`),
@@ -458,7 +523,7 @@ export function apply(ctx, _config = {}) {
       try {
         const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
         const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
-        const s = await status(root)
+        const s = await status(root, chiefOptions(ctx))
         return commandText(formatStatus(s, await getRole(root, invocation.agent.id)))
       } catch (error) {
         return commandError(error)
@@ -591,7 +656,8 @@ export function apply(ctx, _config = {}) {
                 }
               : null
             const briefItems = await listBriefs(root)
-            send(200, { role, initialized, init, openBriefs: briefItems.filter((b) => b.status === 'open').length, root })
+            const chief = chiefStatus(await readChief(root), liveAgentIds(ctx), process.pid)
+            send(200, { role, initialized, init, openBriefs: briefItems.filter((b) => b.status === 'open').length, chief, root })
             return
           }
           if (req.method !== 'PUT' && req.method !== 'POST') {
@@ -616,7 +682,22 @@ export function apply(ctx, _config = {}) {
           }
           if (role !== 'none') await ensureSkeleton(root)
           sessionRoots.set(sid, root)
-          await setRole(root, sid, role)
+          if (role === 'chief') {
+            try {
+              await setChief(root, sid, chiefOptions(ctx))
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error)
+              if (message === 'chief-already-online') {
+                send(409, { error: 'chief-already-online' })
+                return
+              }
+              throw error
+            }
+          } else {
+            await setRole(root, sid, role)
+            const oldChief = await readChief(root)
+            if (oldChief?.session_id === sid) await clearChief(root, sid)
+          }
           const agent = sessionAgents.get(sid)
           if (agent) await refreshProtocol(agent, true)
           send(200, { ok: true, role })
@@ -660,6 +741,16 @@ export function apply(ctx, _config = {}) {
             send(409, { error: 'chief-role-required' })
             return
           }
+          try {
+            await setChief(root, sid, chiefOptions(ctx))
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            if (message === 'chief-already-online') {
+              send(409, { error: 'chief-already-online' })
+              return
+            }
+            throw error
+          }
           const started = await startInit(root, sid)
           const initState = started.state
           send(200, {
@@ -687,8 +778,21 @@ export function apply(ctx, _config = {}) {
     await refreshProtocol(agent, false)
   })
   if (typeof onStart === 'function') disposers.push(onStart)
+  const onCreated = ctx.on('agent/created', async ({ agent }) => {
+    await refreshProtocol(agent, false)
+    const root = sessionRoots.get(agent.id)
+    if (root) await refreshChief(ctx, root, agent)
+  })
+  if (typeof onCreated === 'function') disposers.push(onCreated)
+  const onStatus = ctx.on('agent/status', async ({ agent }) => {
+    const root = sessionRoots.get(agent.id)
+    if (root) await refreshChief(ctx, root, agent)
+  })
+  if (typeof onStatus === 'function') disposers.push(onStatus)
   const onDisposed = ctx.on('agent/disposed', ({ agent }) => {
     protocolDisposers.delete(agent)
+    const root = sessionRoots.get(agent.id)
+    if (root) void refreshChief(ctx, root, agent)
   })
   if (typeof onDisposed === 'function') disposers.push(onDisposed)
 
@@ -735,10 +839,10 @@ function formatStatus(s, role) {
     `- direction：${s.directionExists ? '已存在' : '缺失'}（${s.directionBytes} bytes）`,
     `- 初始化：${s.initialized ? '完成' : s.init ? `进行中 ${s.init.progress}` : '未开始'}`,
     `- briefs：${s.briefs}（未决 ${s.openBriefs}）；notes：${s.notes}；work logs：${s.workLogs}`,
-    `- chief 会话：${s.chiefs.length ? s.chiefs.join(', ') : '（无）'}`,
+    `- 总工：${s.chief?.status || 'none'}${s.chief?.session_id ? `（${s.chief.session_id}）` : ''}`,
     `- .gitignore：${s.gitignore ? '已包含 .sap.local/' : '未包含 .sap.local/'}`,
     s.lastNote ? `- 最近 note：${s.lastNote}` : null,
     '',
-    '命令：/sap-init /sap-brief /sap-brief-status /sap-note /sap-notes /sap-worklog /sap-doctor /sap-status /sap-export /sap-import /sap-clever /sap-qingshen',
+    '命令：/sap-init /sap-chief /sap-brief /sap-brief-status /sap-note /sap-notes /sap-worklog /sap-doctor /sap-status /sap-export /sap-import /sap-clever /sap-qingshen',
   ].filter(Boolean).join('\n')
 }

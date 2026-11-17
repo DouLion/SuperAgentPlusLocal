@@ -10,6 +10,8 @@
 |---|---|
 | `/sap-init` | 多轮初始化：新项目 / 已有项目；回答完问题后 `finalize` 生成 `direction.md`、`charter.md`、模板与角色 |
 | `/sap-init answer <回答>` | 回答当前问题；`/sap-init status` 看进度 |
+| `/sap-init status` / `finalize` | 查看进度 / 生成方向文件并完成；只有总工可初始化 |
+| `/sap-chief status\|takeover` | 查看总工在线状态；总工离线/过期时接管 |
 | `/sap-brief <一句话问题>` | worker 写一页方向 brief；`from <path>` 从文件导入 |
 | `/sap-brief-status <brief-id> <open\|resolved>` | 更新 brief 状态 |
 | `/sap-note <brief-id> <方向判断>` | chief 写方向 note（不是审批）；`from <path>` 从文件导入 |
@@ -43,6 +45,18 @@
 - `/sap-brief from <path>` 与 `/sap-note <brief-id> from <path>` 从文件导入正文；路径相对当前会话 cwd。
 - `/sap-worklog` 追加到 `work/<session>/log.md`，不进方向层，不导出。
 - `/sap-doctor` 只证明文件层状态；它不证明方向正确，也不证明总工上下文未被污染。
+
+## 总工状态与唯一性
+
+- `.sap.local/chief.json` 记录当前总工：`session_id`、`started_at`、`last_seen_at`、`host_pid`。
+- 一个工作区同一时刻只允许一个**在线**总工；已有在线总工时，其他会话选“总工”会被拒绝。
+- 总工状态：
+  - `online`：`host_pid` 匹配且该 session 的 agent 仍在注册表里；
+  - `offline`：同一 host 内 agent 已销毁/未恢复；
+  - `stale`：host 进程重启过（`host_pid` 不匹配）。
+- `agent/created` / `agent/status` 会刷新 `last_seen_at`；`agent/disposed` 后状态转为离线。
+- 角色条会在总工 `offline`/`stale`/`none` 时提示；`/sap-chief status` 可查看，`/sap-chief takeover` 或角色条选“总工”可接管。
+- `/sap-doctor` 会报告总工是否在线、chief 会话是否超过一个。
 
 ## 初始化
 

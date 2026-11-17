@@ -76,6 +76,7 @@ window.__ModuleLoader__.load({
       const [initialized, setInitialized] = useState(false)
       const [init, setInit] = useState(null)
       const [openBriefs, setOpenBriefs] = useState(0)
+      const [chief, setChief] = useState(null)
       const [diag, setDiag] = useState('')
 
       const load = async () => {
@@ -89,6 +90,7 @@ window.__ModuleLoader__.load({
           setInitialized(!!data.initialized)
           setInit(data.init || null)
           setOpenBriefs(Number(data.openBriefs) || 0)
+          setChief(data.chief || null)
         } catch {}
       }
 
@@ -151,13 +153,16 @@ window.__ModuleLoader__.load({
         color: on ? C.onText : C.text,
         opacity: 1,
       })
+      const chiefHint = chief && chief.status !== 'online'
+        ? (chief.status === 'none' ? '无总工' : `总工${chief.status === 'stale' ? '状态过期' : '离线'}`)
+        : null
       const hint = !initialized
         ? (role !== 'chief'
             ? '请先选择“总工”再初始化'
             : (init
                 ? `第 ${Math.min(init.current + 1, init.total)}/${init.total} 问：${String(init.question || '').slice(0, 28)}${String(init.question || '').length > 28 ? '…' : ''} · /sap-init answer`
                 : '点击初始化，或输入 /sap-init'))
-        : (openBriefs > 0 ? `未决 brief ${openBriefs}` : (diag || '已就绪'))
+        : (chiefHint || (openBriefs > 0 ? `未决 brief ${openBriefs}` : (diag || '已就绪')))
 
       const roleButtons = ROLES.map((item) => h('button', {
         key: item.id,

@@ -6,7 +6,9 @@ import path from 'node:path'
 import {
   answerInit,
   appendWorkLog,
+  chiefStatus,
   cleanse,
+  clearChief,
   countWorkLogs,
   createBrief,
   createNote,
@@ -21,9 +23,11 @@ import {
   listBriefs,
   listNotes,
   parseFrontmatter,
+  readChief,
   readText,
   sapPaths,
   setBriefStatus,
+  setChief,
   startInit,
 } from '../lib/sap.js'
 
@@ -139,9 +143,30 @@ test('frontmatter, brief status, worklog and doctor', async () => {
   assert.equal(await countWorkLogs(root), 1)
   assert.match(await readText(path.join(sapPaths(root).work, 'sess-worker', 'log.md')), /完成兼容检查/)
 
-  const result = await doctor(root, 'sess-chief')
+  const result = await doctor(root, 'sess-chief', { liveIds: ['sess-chief'] })
   assert.equal(result.ok, true)
   assert.equal(result.stats.openBriefs, 0)
   assert.equal(result.stats.notes, 1)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('chief record enforces one online chief and detects offline/stale', async () => {
+  const root = await tempProject('chief')
+  await ensureSkeleton(root)
+  await setChief(root, 'sess-chief', { liveIds: ['sess-chief'], hostPid: 1 })
+  assert.equal(chiefStatus(await readChief(root), ['sess-chief'], 1).status, 'online')
+  assert.equal(chiefStatus(await readChief(root), [], 1).status, 'offline')
+  assert.equal(chiefStatus(await readChief(root), ['sess-chief'], 2).status, 'stale')
+
+  await assert.rejects(
+    () => setChief(root, 'sess-other', { liveIds: ['sess-chief'], hostPid: 1 }),
+    /chief-already-online/,
+  )
+  await setChief(root, 'sess-other', { liveIds: [], hostPid: 1 })
+  assert.equal((await readChief(root)).session_id, 'sess-other')
+  assert.equal(await getRole(root, 'sess-chief'), 'none')
+
+  await clearChief(root, 'sess-other')
+  assert.equal(await readChief(root), null)
   await fs.rm(root, { recursive: true, force: true })
 })

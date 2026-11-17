@@ -245,6 +245,28 @@ test('sap-init command refuses a non-chief session', async () => {
   await fs.rm(root, { recursive: true, force: true })
 })
 
+test('sap-chief reports status and allows takeover when offline', async () => {
+  const root = await tempRoot()
+  const { commands, agent } = makeHarness(root)
+  await makeChief(root, agent)
+  const init = commands.get('sap-init')
+  await init.handler({ agent, rawInput: '' })
+  for (const answer of ['目标', '重点', '非目标', '约束', '取舍', '停']) {
+    await init.handler({ agent, rawInput: `answer ${answer}` })
+  }
+  await init.handler({ agent, rawInput: 'finalize' })
+
+  const chief = commands.get('sap-chief')
+  const status = await chief.handler({ agent, rawInput: 'status' })
+  assert.equal(status.kind, 'success')
+  assert.match(status.text, /总工状态：/)
+
+  const takeover = await chief.handler({ agent, rawInput: 'takeover' })
+  assert.equal(takeover.kind, 'success')
+  assert.match(takeover.text, /已接管总工/)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 test('brief status, notes, worklog and doctor close the loop', async () => {
   const root = await tempRoot()
   const { commands, agent } = makeHarness(root)
