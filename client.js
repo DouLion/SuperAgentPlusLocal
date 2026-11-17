@@ -9,7 +9,7 @@ window.__ModuleLoader__.load({
     const module = { exports: {} }
     const exports = module.exports
     const React = require('react')
-    const { createElement: h, useState, useEffect, useRef } = React
+    const { createElement: h, useState, useEffect } = React
 
     const ENDPOINT = '/sap-local/role'
     const ROLES = [
@@ -77,7 +77,6 @@ window.__ModuleLoader__.load({
       const [init, setInit] = useState(null)
       const [openBriefs, setOpenBriefs] = useState(0)
       const [diag, setDiag] = useState('')
-      const initializedRef = useRef(false)
 
       const load = async () => {
         if (!sessionId) return
@@ -90,7 +89,6 @@ window.__ModuleLoader__.load({
           setInitialized(!!data.initialized)
           setInit(data.init || null)
           setOpenBriefs(Number(data.openBriefs) || 0)
-          initializedRef.current = !!data.initialized
         } catch {}
       }
 
@@ -99,8 +97,8 @@ window.__ModuleLoader__.load({
         const run = async () => { if (alive) await load() }
         run()
         const timer = setInterval(() => {
-          if (alive && !initializedRef.current) run()
-        }, 3000)
+          if (alive) run()
+        }, 10000)
         return () => { alive = false; clearInterval(timer) }
       }, [sessionId, cwd])
 
