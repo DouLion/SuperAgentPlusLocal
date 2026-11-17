@@ -249,6 +249,11 @@ export function apply(ctx, _config = {}) {
         const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
         const args = splitArgs(invocation.rawInput)
         const action = args[0] || ''
+        const initialized = (await readJson(sapPaths(root).state, null))?.initialized === true
+        const mutating = ['', 'new', 'existing', 'answer', 'finalize'].includes(action)
+        if (mutating && !initialized && (await getRole(root, invocation.agent.id)) !== 'chief') {
+          return commandError('只有总工方向会话可以初始化；请先在 SAP 角色条选择“总工”。')
+        }
         if (action === 'help') {
           return commandText([
             '用法：',
@@ -605,10 +610,11 @@ export function apply(ctx, _config = {}) {
             return
           }
           let root = await rootForSession(ctx, sessionRoots, sid, typeof body.cwd === 'string' ? body.cwd : '', { strict: true })
-          if (!root || !(await exists(path.join(root, '.sap.local')))) {
-            send(409, { error: 'not-initialized' })
+          if (!root) {
+            send(409, { error: 'cannot-resolve-root' })
             return
           }
+          if (role !== 'none') await ensureSkeleton(root)
           sessionRoots.set(sid, root)
           await setRole(root, sid, role)
           const agent = sessionAgents.get(sid)
@@ -648,6 +654,10 @@ export function apply(ctx, _config = {}) {
           const state = await readJson(sapPaths(root).state, null)
           if (state?.initialized) {
             send(200, { ok: true, initialized: true })
+            return
+          }
+          if ((await getRole(root, sid)) !== 'chief') {
+            send(409, { error: 'chief-role-required' })
             return
           }
           const started = await startInit(root, sid)

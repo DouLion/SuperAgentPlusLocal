@@ -152,9 +152,11 @@ window.__ModuleLoader__.load({
         opacity: 1,
       })
       const hint = !initialized
-        ? (init
-            ? `第 ${Math.min(init.current + 1, init.total)}/${init.total} 问：${String(init.question || '').slice(0, 28)}${String(init.question || '').length > 28 ? '…' : ''} · /sap-init answer`
-            : '未初始化 · 点击初始化或输入 /sap-init')
+        ? (role !== 'chief'
+            ? '请先选择“总工”再初始化'
+            : (init
+                ? `第 ${Math.min(init.current + 1, init.total)}/${init.total} 问：${String(init.question || '').slice(0, 28)}${String(init.question || '').length > 28 ? '…' : ''} · /sap-init answer`
+                : '点击初始化，或输入 /sap-init'))
         : (openBriefs > 0 ? `未决 brief ${openBriefs}` : (diag || '已就绪'))
 
       const roleButtons = ROLES.map((item) => h('button', {
@@ -176,7 +178,8 @@ window.__ModuleLoader__.load({
       },
         h('div', { style: bar, title: 'SAP 单机角色：无角色=不参与；总工=只读方向；工作=实现/调试' },
           h('span', { style: label }, 'SAP'),
-          ...(initialized ? roleButtons : [initButton]),
+          ...roleButtons,
+          ...(!initialized && role === 'chief' ? [initButton] : []),
           h('span', { style: { marginLeft: 'auto', opacity: 0.6, fontSize: 10, whiteSpace: 'nowrap', color: C.muted } }, hint),
         ),
       )

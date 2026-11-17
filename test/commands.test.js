@@ -4,6 +4,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { apply } from '../index.js'
+import { setRole } from '../lib/sap.js'
 
 function makeHarness(cwd, webServer, workspaceRegistry) {
   const commands = new Map()
@@ -70,6 +71,10 @@ async function tempRoot() {
   return root
 }
 
+async function makeChief(root, agent) {
+  await setRole(root, agent.id, 'chief')
+}
+
 test('role route persists none/chief/worker for the session', async () => {
   const root = await tempRoot()
   const routes = []
@@ -80,6 +85,7 @@ test('role route persists none/chief/worker for the session', async () => {
     },
   }
   const { commands, agent } = makeHarness(root, webServer)
+  await makeChief(root, agent)
   const init = commands.get('sap-init')
   await init.handler({ agent, rawInput: '' })
   for (const answer of ['目标', '重点', '非目标', '约束', '取舍', '停']) {
@@ -139,6 +145,7 @@ test('command surface covers init/export/import/clever and injects chief protoco
     assert.ok(commands.has(name), `missing ${name}`)
   }
   assert.equal(commands.has('sap-role'), false)
+  await makeChief(root, agent)
   const init = commands.get('sap-init')
   let result = await init.handler({ agent, rawInput: '' })
   assert.equal(result.kind, 'success')
@@ -182,6 +189,7 @@ test('init route starts the interview when uninitialized', async () => {
     },
   }
   const { agent } = makeHarness(root, webServer)
+  await makeChief(root, agent)
   const route = routes.find((item) => item.path === '/sap-local/init')
   assert.ok(route)
   const exchange = fakeExchange('POST', '/sap-local/init', { sessionId: agent.id, cwd: root })
@@ -192,9 +200,55 @@ test('init route starts the interview when uninitialized', async () => {
   await fs.rm(root, { recursive: true, force: true })
 })
 
+test('init route refuses a non-chief session', async () => {
+  const root = await tempRoot()
+  const routes = []
+  const webServer = {
+    register(definition) {
+      routes.push(definition)
+      return () => {}
+    },
+  }
+  const { agent } = makeHarness(root, webServer)
+  const route = routes.find((item) => item.path === '/sap-local/init')
+  const exchange = fakeExchange('POST', '/sap-local/init', { sessionId: agent.id, cwd: root })
+  await route.handler(exchange.req, exchange.res)
+  assert.equal(exchange.status, 409)
+  assert.equal(exchange.json.error, 'chief-role-required')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('role route allows chief selection before initialization', async () => {
+  const root = await tempRoot()
+  const routes = []
+  const webServer = {
+    register(definition) {
+      routes.push(definition)
+      return () => {}
+    },
+  }
+  const { agent } = makeHarness(root, webServer)
+  const route = routes.find((item) => item.path === '/sap-local/role')
+  const exchange = fakeExchange('PUT', '/sap-local/role', { sessionId: agent.id, cwd: root, role: 'chief' })
+  await route.handler(exchange.req, exchange.res)
+  assert.equal(exchange.status, 200)
+  assert.ok(await fs.stat(path.join(root, '.sap.local', 'sessions', `${agent.id}.json`)))
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('sap-init command refuses a non-chief session', async () => {
+  const root = await tempRoot()
+  const { commands, agent } = makeHarness(root)
+  const result = await commands.get('sap-init').handler({ agent, rawInput: '' })
+  assert.equal(result.kind, 'error')
+  assert.match(result.text, /总工/)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 test('brief status, notes, worklog and doctor close the loop', async () => {
   const root = await tempRoot()
   const { commands, agent } = makeHarness(root)
+  await makeChief(root, agent)
   const init = commands.get('sap-init')
   await init.handler({ agent, rawInput: '' })
   for (const answer of ['目标', '重点', '非目标', '约束', '取舍', '停']) {
@@ -231,6 +285,7 @@ test('brief status, notes, worklog and doctor close the loop', async () => {
 test('brief from file imports the file body', async () => {
   const root = await tempRoot()
   const { commands, agent } = makeHarness(root)
+  await makeChief(root, agent)
   const init = commands.get('sap-init')
   await init.handler({ agent, rawInput: '' })
   for (const answer of ['目标', '重点', '非目标', '约束', '取舍', '停']) {
@@ -262,6 +317,7 @@ test('workspace registry resolves root when client has no cwd', async () => {
     },
   }
   const { agent } = makeHarness('', webServer, registry)
+  await makeChief(root, agent)
   const route = routes.find((item) => item.path === '/sap-local/init')
   const exchange = fakeExchange('POST', '/sap-local/init', { sessionId: agent.id })
   await route.handler(exchange.req, exchange.res)
