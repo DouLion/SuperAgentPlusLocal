@@ -173,7 +173,7 @@ function serviceFromCtx(context, name) {
   return undefined
 }
 
-async function rootForSession(context, roots, sessionId, cwd) {
+async function rootForSession(context, roots, sessionId, cwd, { strict = false } = {}) {
   const cached = roots.get(sessionId)
   if (cached) return cached
   const registry = serviceFromCtx(context, 'workspaceRegistry')
@@ -184,6 +184,7 @@ async function rootForSession(context, roots, sessionId, cwd) {
     } catch {}
   }
   if (cwd) return findRoot(cwd)
+  if (strict) return null
   return findRoot(process.cwd())
 }
 
@@ -591,8 +592,8 @@ export function apply(ctx, _config = {}) {
           const sessionId = url.searchParams.get('sessionId') || ''
           const cwd = url.searchParams.get('cwd') || ''
           if (req.method === 'GET' || req.method === 'HEAD') {
-            const root = await rootForSession(ctx, sessionRoots, sessionId, cwd)
-            if (!(await exists(path.join(root, '.sap.local')))) {
+            const root = await rootForSession(ctx, sessionRoots, sessionId, cwd, { strict: true })
+            if (!root || !(await exists(path.join(root, '.sap.local')))) {
               send(200, { role: 'none', initialized: false })
               return
             }
@@ -627,8 +628,8 @@ export function apply(ctx, _config = {}) {
             send(400, { error: 'role must be none|chief|worker' })
             return
           }
-          let root = await rootForSession(ctx, sessionRoots, sid, typeof body.cwd === 'string' ? body.cwd : '')
-          if (!(await exists(path.join(root, '.sap.local')))) {
+          let root = await rootForSession(ctx, sessionRoots, sid, typeof body.cwd === 'string' ? body.cwd : '', { strict: true })
+          if (!root || !(await exists(path.join(root, '.sap.local')))) {
             send(409, { error: 'not-initialized' })
             return
           }
@@ -661,7 +662,11 @@ export function apply(ctx, _config = {}) {
             send(400, { error: 'sessionId required' })
             return
           }
-          let root = await rootForSession(ctx, sessionRoots, sid, typeof body.cwd === 'string' ? body.cwd : '')
+          let root = await rootForSession(ctx, sessionRoots, sid, typeof body.cwd === 'string' ? body.cwd : '', { strict: true })
+          if (!root) {
+            send(409, { error: 'cannot-resolve-root' })
+            return
+          }
           await ensureSkeleton(root)
           sessionRoots.set(sid, root)
           const state = await readJson(sapPaths(root).state, null)

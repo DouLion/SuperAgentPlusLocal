@@ -277,4 +277,20 @@ test('workspace registry resolves root when client has no cwd', async () => {
   await fs.rm(root, { recursive: true, force: true })
 })
 
+test('init route refuses to guess a root without cwd or workspace', async () => {
+  const routes = []
+  const webServer = {
+    register(definition) {
+      routes.push(definition)
+      return () => {}
+    },
+  }
+  const { agent } = makeHarness('', webServer)
+  const route = routes.find((item) => item.path === '/sap-local/init')
+  const exchange = fakeExchange('POST', '/sap-local/init', { sessionId: agent.id })
+  await route.handler(exchange.req, exchange.res)
+  assert.equal(exchange.status, 409)
+  assert.equal(exchange.json.error, 'cannot-resolve-root')
+})
+
 
