@@ -1,0 +1,5 @@
+node_modules/
+.sap.local/
+*.log
+.DS_Store
+exports/

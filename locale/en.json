@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "SAP Local",
+    "description": "Single-user direction/work session isolation: /sap-init, /sap-export, /sap-import, /sap-clever.",
+    "detail": "docs/DETAIL.md"
+  }
+}

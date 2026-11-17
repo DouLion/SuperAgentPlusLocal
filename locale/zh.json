@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "SAP 单机方向隔离",
+    "description": "单机方向会话与工作会话隔离：/sap-init、/sap-export、/sap-import、/sap-clever。",
+    "detail": "docs/DETAIL.md"
+  }
+}
