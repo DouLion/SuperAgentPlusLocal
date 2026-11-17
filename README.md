@@ -8,8 +8,11 @@
 
 ## 功能
 
-- **角色条**：输入框上方显示 `SAP [无角色] [总工] [工作]`；默认 **无角色**，该会话完全不参与 SAP。选择按会话保存。
+- **角色条**：输入框上方显示 `SAP [无角色] [总工] [工作]`；默认 **无角色**，该会话完全不参与 SAP。选择按会话保存，并显示未决 brief 数。
 - **`/sap-init`**：多轮问答初始化，区分新项目 / 已有项目；完成后生成 `direction.md`、`charter.md` 与模板。
+- **`/sap-brief` / `/sap-note`**：一页 brief 与方向 note；支持 `from <path>` 导入、`open/resolved` 状态。
+- **`/sap-worklog`**：记录 `work/<session>/log.md`，总工不读、不导出。
+- **`/sap-doctor`**：文件级健康检查：方向、角色、gitignore、未决 brief、疑似污染。
 - **`/sap-export` / `/sap-import`**：换机/交接；只导出方向层，不带 `work/`。
 - **`/sap-clever`**：方向会话排污；生成方向摘要包，建议新会话继续。
 - **注入**：按角色使用 `agent.ctx.systemPrompt.section`，不写入聊天历史。
@@ -36,9 +39,13 @@
 | `/sap-init answer <回答>` | 多轮回答当前问题 |
 | `/sap-init status` / `finalize` | 查看进度 / 生成方向文件并完成 |
 | `/sap-role none\|chief\|worker` | 设置当前会话角色 |
-| `/sap-brief <问题>` | worker 写一页方向 brief |
-| `/sap-note <brief-id> <判断>` | chief 写方向 note（不是审批） |
-| `/sap-notes` / `/sap-status` | 查看状态 |
+| `/sap-brief <问题>` / `from <path>` | worker 写一页方向 brief，或从文件导入 |
+| `/sap-brief-status <id> <open\|resolved>` | 更新 brief 状态 |
+| `/sap-note <brief-id> <判断>` / `from <path>` | chief 写方向 note（不是审批） |
+| `/sap-notes` | 列出未决 brief 与最近 note |
+| `/sap-worklog <内容>` | 追加工作日志到 `work/<session>/log.md` |
+| `/sap-doctor` | 文件级健康检查 |
+| `/sap-status` | 查看状态 |
 | `/sap-export [路径]` | 导出方向层 JSON；不含 `work/` |
 | `/sap-import <bundle> [--replace]` | 默认合并；`--replace` 先备份再覆盖 |
 | `/sap-clever` | chief 排污：生成方向摘要包，建议新会话继续 |
@@ -89,7 +96,7 @@
 node --test test/*.test.js
 ```
 
-当前版本：`0.1.4`。
+当前版本：`0.1.5`。
 
 ## License
 

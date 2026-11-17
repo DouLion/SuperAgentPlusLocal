@@ -5,9 +5,12 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   answerInit,
+  appendWorkLog,
   cleanse,
+  countWorkLogs,
   createBrief,
   createNote,
+  doctor,
   ensureSkeleton,
   exportBundle,
   finalizeInit,
@@ -15,8 +18,12 @@ import {
   getRole,
   importBundle,
   initStatus,
+  listBriefs,
+  listNotes,
+  parseFrontmatter,
   readText,
   sapPaths,
+  setBriefStatus,
   startInit,
 } from '../lib/sap.js'
 
@@ -102,5 +109,39 @@ test('cleanse writes a direction-only note', async () => {
   assert.match(text, /不要粘贴旧日志/)
   const session = JSON.parse(await readText(path.join(sapPaths(root).sessions, 'sess-chief.json')))
   assert.ok(session.cleansed_at)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('frontmatter, brief status, worklog and doctor', async () => {
+  const root = await tempProject('doctor')
+  await startInit(root, 'sess-chief', 'new')
+  for (const answer of ['目标', '重点', '非目标', '约束', '取舍', '停']) await answerInit(root, answer)
+  await finalizeInit(root, 'sess-chief')
+
+  const brief = await createBrief(root, 'sess-worker', '是否调整公共接口？')
+  const briefText = await readText(brief.file)
+  const parsed = parseFrontmatter(briefText)
+  assert.equal(parsed.data.status, 'open')
+  assert.equal(parsed.data.id, brief.id)
+  assert.match(parsed.body, /是否调整公共接口？/)
+
+  const briefs = await listBriefs(root)
+  assert.equal(briefs.length, 1)
+  assert.equal(briefs[0].status, 'open')
+
+  await setBriefStatus(root, brief.id, 'resolved')
+  assert.equal((await listBriefs(root))[0].status, 'resolved')
+
+  await createNote(root, 'sess-chief', brief.id, '保持兼容')
+  assert.equal((await listNotes(root)).length, 1)
+
+  await appendWorkLog(root, 'sess-worker', '完成兼容检查')
+  assert.equal(await countWorkLogs(root), 1)
+  assert.match(await readText(path.join(sapPaths(root).work, 'sess-worker', 'log.md')), /完成兼容检查/)
+
+  const result = await doctor(root, 'sess-chief')
+  assert.equal(result.ok, true)
+  assert.equal(result.stats.openBriefs, 0)
+  assert.equal(result.stats.notes, 1)
   await fs.rm(root, { recursive: true, force: true })
 })

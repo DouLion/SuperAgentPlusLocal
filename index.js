@@ -2,9 +2,11 @@ import path from 'node:path'
 import fs from 'node:fs/promises'
 import {
   answerInit,
+  appendWorkLog,
   cleanse,
   createBrief,
   createNote,
+  doctor,
   ensureSkeleton,
   exists,
   exportBundle,
@@ -13,8 +15,12 @@ import {
   getRole,
   importBundle,
   initStatus,
+  listBriefs,
+  listNotes,
   nowIso,
   readJson,
+  readText,
+  setBriefStatus,
   setRole,
   sapPaths,
   startInit,
@@ -159,6 +165,27 @@ function serviceFromAgent(agent, name) {
   return undefined
 }
 
+function serviceFromCtx(context, name) {
+  if (!context) return undefined
+  if (context[name]) return context[name]
+  if (typeof context.get === 'function') return context.get(name)
+  return undefined
+}
+
+async function rootForSession(context, roots, sessionId, cwd) {
+  const cached = roots.get(sessionId)
+  if (cached) return cached
+  const registry = serviceFromCtx(context, 'workspaceRegistry')
+  if (registry && typeof registry.list === 'function') {
+    try {
+      const workspace = registry.list().find((item) => item && Array.isArray(item.sessionIds) && item.sessionIds.includes(sessionId))
+      if (workspace?.path) return workspace.path
+    } catch {}
+  }
+  if (cwd) return findRoot(cwd)
+  return findRoot(process.cwd())
+}
+
 export function apply(ctx, _config = {}) {
   const disposers = []
   const protocolDisposers = new Map()
@@ -169,7 +196,7 @@ export function apply(ctx, _config = {}) {
     try {
       if (!agent) return
       const cwd = agent.session?.header?.cwd || process.cwd()
-      const root = await findRoot(cwd)
+      const root = await rootForSession(ctx, sessionRoots, agent.id, cwd)
       if (!(await exists(path.join(root, '.sap.local')))) return
       sessionRoots.set(agent.id, root)
       sessionAgents.set(agent.id, agent)
@@ -217,7 +244,7 @@ export function apply(ctx, _config = {}) {
     async handler(invocation) {
       try {
         const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
-        const root = await findRoot(cwd)
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
         const args = splitArgs(invocation.rawInput)
         const action = args[0] || ''
         if (action === 'help') {
@@ -294,7 +321,7 @@ export function apply(ctx, _config = {}) {
         const role = args[0]
         if (!['none', 'chief', 'worker'].includes(role)) return commandError('用法：/sap-role none|chief|worker')
         const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
-        const root = await findRoot(cwd)
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
         await ensureSkeleton(root)
         await setRole(root, invocation.agent.id, role)
         await refreshProtocol(invocation.agent, true)
@@ -313,10 +340,17 @@ export function apply(ctx, _config = {}) {
     input: { hint: '<一句话方向问题>' },
     async handler(invocation) {
       try {
-        const text = String(invocation.rawInput || '').trim()
-        if (!text) return commandError('用法：/sap-brief <一句话方向问题>')
+        const args = splitArgs(invocation.rawInput)
+        let text = String(invocation.rawInput || '').trim()
+        if (args[0] === 'from' && args[1]) {
+          const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
+          const file = path.isAbsolute(args[1]) ? args[1] : path.resolve(cwd, args.slice(1).join(' '))
+          text = await readText(file, '')
+          if (!text.trim()) return commandError(`文件为空或不存在：${file}`)
+        }
+        if (!text) return commandError('用法：/sap-brief <一句话方向问题> | /sap-brief from <path>')
         const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
-        const root = await findRoot(cwd)
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
         const result = await createBrief(root, invocation.agent.id, text)
         return commandText([
           `已写 brief：${result.file}`,
@@ -330,16 +364,41 @@ export function apply(ctx, _config = {}) {
   })
 
   cmd({
-    name: 'sap-note',
-    description: '写方向 note（chief 用；不是 approve/reject）',
-    input: { hint: '<brief-id> <方向判断>' },
+    name: 'sap-brief-status',
+    description: '更新 brief 状态：open | resolved',
+    input: { hint: '<brief-id> <open|resolved>' },
+    recordInput: false,
     async handler(invocation) {
       try {
         const args = splitArgs(invocation.rawInput)
-        if (args.length < 2) return commandError('用法：/sap-note <brief-id> <方向判断>')
+        if (args.length < 2) return commandError('用法：/sap-brief-status <brief-id> <open|resolved>')
         const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
-        const root = await findRoot(cwd)
-        const result = await createNote(root, invocation.agent.id, args[0], args.slice(1).join(' '))
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
+        const result = await setBriefStatus(root, args[0], args[1])
+        return commandText(`brief ${result.id} 已设为 ${result.status}。`)
+      } catch (error) {
+        return commandError(error)
+      }
+    },
+  })
+
+  cmd({
+    name: 'sap-note',
+    description: '写方向 note（chief 用；不是 approve/reject）',
+    input: { hint: '<brief-id> <方向判断> | <brief-id> from <path>' },
+    async handler(invocation) {
+      try {
+        const args = splitArgs(invocation.rawInput)
+        if (args.length < 2) return commandError('用法：/sap-note <brief-id> <方向判断> | /sap-note <brief-id> from <path>')
+        const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
+        let conclusion = args.slice(1).join(' ')
+        if (args[1] === 'from' && args[2]) {
+          const file = path.isAbsolute(args[2]) ? args[2] : path.resolve(cwd, args.slice(2).join(' '))
+          conclusion = await readText(file, '')
+          if (!conclusion.trim()) return commandError(`文件为空或不存在：${file}`)
+        }
+        const result = await createNote(root, invocation.agent.id, args[0], conclusion)
         return commandText(`已写 note：${result.file}\n注意：这是方向指导，不是审批。`)
       } catch (error) {
         return commandError(error)
@@ -348,14 +407,61 @@ export function apply(ctx, _config = {}) {
   })
 
   cmd({
-    name: 'sap-notes',
-    description: '列出 direction/briefs/notes 与当前状态',
+    name: 'sap-worklog',
+    description: '记录工作会话操作日志（写 work/<session>/log.md；总工不读）',
+    input: { hint: '<工作内容>' },
+    async handler(invocation) {
+      try {
+        const text = String(invocation.rawInput || '').trim()
+        if (!text) return commandError('用法：/sap-worklog <工作内容>')
+        const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
+        const result = await appendWorkLog(root, invocation.agent.id, text)
+        return commandText(`已记录工作日志：${result.file}`)
+      } catch (error) {
+        return commandError(error)
+      }
+    },
+  })
+
+  cmd({
+    name: 'sap-doctor',
+    description: '检查 SAP 单机状态：方向/角色/gitignore/未决 brief/疑似污染',
     async handler(invocation) {
       try {
         const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
-        const root = await findRoot(cwd)
-        const s = await status(root)
-        return commandText(formatStatus(s, await getRole(root, invocation.agent.id)))
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
+        const result = await doctor(root, invocation.agent.id)
+        const lines = [
+          `SAP doctor：${result.ok ? '通过' : '有警告'}`,
+          ...result.checks.map((c) => `${c.ok ? '✓' : '✗'} ${c.message}`),
+          '',
+          `未决 brief：${result.stats.openBriefs}；notes：${result.stats.notes}；work logs：${result.stats.workLogs}`,
+          '注意：这是文件级检查，不证明方向正确或会话上下文未被污染。',
+        ]
+        return commandText(lines.join('\n'))
+      } catch (error) {
+        return commandError(error)
+      }
+    },
+  })
+
+  cmd({
+    name: 'sap-notes',
+    description: '列出未决 brief 与最近 note',
+    async handler(invocation) {
+      try {
+        const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
+        const briefs = (await listBriefs(root)).filter((b) => b.status === 'open')
+        const notes = (await listNotes(root)).slice(-5).reverse()
+        const lines = ['未决 brief：']
+        lines.push(...briefs.slice(0, 10).map((b) => `- ${b.id} ${b.title}`))
+        if (!briefs.length) lines.push('（无）')
+        lines.push('', '最近 note：')
+        lines.push(...notes.map((n) => `- ${n.id} ${n.title}${n.brief ? `（brief ${n.brief}）` : ''}`))
+        if (!notes.length) lines.push('（无）')
+        return commandText(lines.join('\n'))
       } catch (error) {
         return commandError(error)
       }
@@ -368,7 +474,7 @@ export function apply(ctx, _config = {}) {
     async handler(invocation) {
       try {
         const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
-        const root = await findRoot(cwd)
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
         const s = await status(root)
         return commandText(formatStatus(s, await getRole(root, invocation.agent.id)))
       } catch (error) {
@@ -385,7 +491,7 @@ export function apply(ctx, _config = {}) {
       try {
         const args = splitArgs(invocation.rawInput)
         const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
-        const root = await findRoot(cwd)
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
         const result = await exportBundle(root, args[0] || null)
         return commandText(`已导出：${result.path}\n文件数：${result.files}；字节：${result.bytes}\n注意：只导出方向层，不含 work/ 操作细节。`)
       } catch (error) {
@@ -405,7 +511,7 @@ export function apply(ctx, _config = {}) {
         const replace = args.includes('--replace')
         const bundlePath = args.find((a) => a !== '--replace')
         const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
-        const root = await findRoot(cwd)
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
         const result = await importBundle(root, bundlePath, { replace })
         return commandText([
           `已导入 ${result.imported} 个文件。`,
@@ -424,7 +530,7 @@ export function apply(ctx, _config = {}) {
     async handler(invocation) {
       try {
         const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
-        const root = await findRoot(cwd)
+        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
         const role = await getRole(root, invocation.agent.id)
         if (role !== 'chief') return commandError('只有 chief 方向会话可以排污；先运行 /sap-role chief。')
         const result = await cleanse(root, invocation.agent.id)
@@ -484,12 +590,12 @@ export function apply(ctx, _config = {}) {
           const sessionId = url.searchParams.get('sessionId') || ''
           const cwd = url.searchParams.get('cwd') || ''
           if (req.method === 'GET' || req.method === 'HEAD') {
-            let root = sessionRoots.get(sessionId)
-            if (!root && cwd) root = await findRoot(cwd)
-            if (!root) {
+            const root = await rootForSession(ctx, sessionRoots, sessionId, cwd)
+            if (!(await exists(path.join(root, '.sap.local')))) {
               send(200, { role: 'none', initialized: false })
               return
             }
+            sessionRoots.set(sessionId, root)
             const initialized = (await readJson(sapPaths(root).state, null))?.initialized === true
             const role = await getRole(root, sessionId)
             const initState = await readJson(sapPaths(root).init, null)
@@ -501,7 +607,8 @@ export function apply(ctx, _config = {}) {
                   question: initState.questions[Math.min(initState.current, initState.questions.length - 1)]?.text || '',
                 }
               : null
-            send(200, { role, initialized, init, root })
+            const briefItems = await listBriefs(root)
+            send(200, { role, initialized, init, openBriefs: briefItems.filter((b) => b.status === 'open').length, root })
             return
           }
           if (req.method !== 'PUT' && req.method !== 'POST') {
@@ -519,14 +626,13 @@ export function apply(ctx, _config = {}) {
             send(400, { error: 'role must be none|chief|worker' })
             return
           }
-          let root = sessionRoots.get(sid)
-          if (!root && typeof body.cwd === 'string' && body.cwd) root = await findRoot(body.cwd)
-          if (!root || !(await exists(path.join(root, '.sap.local')))) {
+          let root = await rootForSession(ctx, sessionRoots, sid, typeof body.cwd === 'string' ? body.cwd : '')
+          if (!(await exists(path.join(root, '.sap.local')))) {
             send(409, { error: 'not-initialized' })
             return
           }
-          await setRole(root, sid, role)
           sessionRoots.set(sid, root)
+          await setRole(root, sid, role)
           const agent = sessionAgents.get(sid)
           if (agent) await refreshProtocol(agent, true)
           send(200, { ok: true, role })
@@ -554,9 +660,7 @@ export function apply(ctx, _config = {}) {
             send(400, { error: 'sessionId required' })
             return
           }
-          let root = sessionRoots.get(sid)
-          if (!root && typeof body.cwd === 'string' && body.cwd) root = await findRoot(body.cwd)
-          if (!root) root = await findRoot(process.cwd())
+          let root = await rootForSession(ctx, sessionRoots, sid, typeof body.cwd === 'string' ? body.cwd : '')
           await ensureSkeleton(root)
           sessionRoots.set(sid, root)
           const state = await readJson(sapPaths(root).state, null)
@@ -638,11 +742,11 @@ function formatStatus(s, role) {
     `- 项目：${s.root}`,
     `- direction：${s.directionExists ? '已存在' : '缺失'}（${s.directionBytes} bytes）`,
     `- 初始化：${s.initialized ? '完成' : s.init ? `进行中 ${s.init.progress}` : '未开始'}`,
-    `- briefs：${s.briefs}；notes：${s.notes}`,
+    `- briefs：${s.briefs}（未决 ${s.openBriefs}）；notes：${s.notes}；work logs：${s.workLogs}`,
     `- chief 会话：${s.chiefs.length ? s.chiefs.join(', ') : '（无）'}`,
     `- .gitignore：${s.gitignore ? '已包含 .sap.local/' : '未包含 .sap.local/'}`,
     s.lastNote ? `- 最近 note：${s.lastNote}` : null,
     '',
-    '命令：/sap-init /sap-role /sap-brief /sap-note /sap-notes /sap-status /sap-export /sap-import /sap-clever /sap-qingshen',
+    '命令：/sap-init /sap-role /sap-brief /sap-brief-status /sap-note /sap-notes /sap-worklog /sap-doctor /sap-status /sap-export /sap-import /sap-clever /sap-qingshen',
   ].filter(Boolean).join('\n')
 }

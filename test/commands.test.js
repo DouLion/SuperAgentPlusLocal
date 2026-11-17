@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { apply } from '../index.js'
 
-function makeHarness(cwd, webServer) {
+function makeHarness(cwd, webServer, workspaceRegistry) {
   const commands = new Map()
   const sections = []
   const ctx = {
@@ -25,7 +25,9 @@ function makeHarness(cwd, webServer) {
       try { fn() } catch {}
     },
     get(name) {
-      return name === 'webServer' ? webServer : undefined
+      if (name === 'webServer') return webServer
+      if (name === 'workspaceRegistry') return workspaceRegistry
+      return undefined
     },
     logger: { warn() {} },
   }
@@ -196,4 +198,83 @@ test('init route starts the interview when uninitialized', async () => {
   assert.ok(exchange.json.init.question)
   await fs.rm(root, { recursive: true, force: true })
 })
+
+test('brief status, notes, worklog and doctor close the loop', async () => {
+  const root = await tempRoot()
+  const { commands, agent } = makeHarness(root)
+  const init = commands.get('sap-init')
+  await init.handler({ agent, rawInput: '' })
+  for (const answer of ['目标', '重点', '非目标', '约束', '取舍', '停']) {
+    await init.handler({ agent, rawInput: `answer ${answer}` })
+  }
+  await init.handler({ agent, rawInput: 'finalize' })
+
+  const brief = await commands.get('sap-brief').handler({ agent, rawInput: '是否调整公共接口？' })
+  assert.equal(brief.kind, 'success')
+  const briefId = /brief-[a-z0-9-]+/.exec(brief.text)?.[0]
+
+  const notes = await commands.get('sap-notes').handler({ agent, rawInput: '' })
+  assert.match(notes.text, new RegExp(briefId))
+
+  const resolved = await commands.get('sap-brief-status').handler({ agent, rawInput: `${briefId} resolved` })
+  assert.equal(resolved.kind, 'success')
+  const afterResolve = await commands.get('sap-notes').handler({ agent, rawInput: '' })
+  assert.doesNotMatch(afterResolve.text, new RegExp(briefId))
+
+  const note = await commands.get('sap-note').handler({ agent, rawInput: `${briefId} 保持兼容` })
+  assert.equal(note.kind, 'success')
+
+  const log = await commands.get('sap-worklog').handler({ agent, rawInput: '完成接口兼容检查' })
+  assert.equal(log.kind, 'success')
+  assert.ok(await fs.stat(path.join(root, '.sap.local', 'work', agent.id, 'log.md')))
+
+  const doctor = await commands.get('sap-doctor').handler({ agent, rawInput: '' })
+  assert.equal(doctor.kind, 'success')
+  assert.match(doctor.text, /通过|有警告/)
+  assert.match(doctor.text, /未决 brief：0/)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('brief from file imports the file body', async () => {
+  const root = await tempRoot()
+  const { commands, agent } = makeHarness(root)
+  const init = commands.get('sap-init')
+  await init.handler({ agent, rawInput: '' })
+  for (const answer of ['目标', '重点', '非目标', '约束', '取舍', '停']) {
+    await init.handler({ agent, rawInput: `answer ${answer}` })
+  }
+  await init.handler({ agent, rawInput: 'finalize' })
+  const file = path.join(root, 'draft-brief.md')
+  await fs.writeFile(file, '方向问题：是否拆分模块？\n\n影响：发布节奏。\n', 'utf8')
+  const result = await commands.get('sap-brief').handler({ agent, rawInput: `from ${file}` })
+  assert.equal(result.kind, 'success')
+  const briefId = /brief-[a-z0-9-]+/.exec(result.text)?.[0]
+  const text = await fs.readFile(path.join(root, '.sap.local', 'briefs', `${briefId}.md`), 'utf8')
+  assert.match(text, /是否拆分模块？/)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('workspace registry resolves root when client has no cwd', async () => {
+  const root = await tempRoot()
+  const routes = []
+  const webServer = {
+    register(definition) {
+      routes.push(definition)
+      return () => {}
+    },
+  }
+  const registry = {
+    list() {
+      return [{ path: root, sessionIds: ['sess-chief'] }]
+    },
+  }
+  const { agent } = makeHarness('', webServer, registry)
+  const route = routes.find((item) => item.path === '/sap-local/init')
+  const exchange = fakeExchange('POST', '/sap-local/init', { sessionId: agent.id })
+  await route.handler(exchange.req, exchange.res)
+  assert.equal(exchange.status, 200)
+  assert.ok(await fs.stat(path.join(root, '.sap.local', 'init.json')))
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 

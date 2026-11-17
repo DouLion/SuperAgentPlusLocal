@@ -20,7 +20,7 @@ window.__ModuleLoader__.load({
 
     function sessionIdOf(props) {
       const session = props && props.session
-      return (session && (session.id || session.sessionId)) || (props && props.sessionId) || ''
+      return (session && (session.sessionId || session.id)) || (props && props.sessionId) || ''
     }
 
     function cwdOf(props) {
@@ -75,6 +75,7 @@ window.__ModuleLoader__.load({
       const [role, setRole] = useState('none')
       const [initialized, setInitialized] = useState(false)
       const [init, setInit] = useState(null)
+      const [openBriefs, setOpenBriefs] = useState(0)
       const [diag, setDiag] = useState('')
       const initializedRef = useRef(false)
 
@@ -88,6 +89,7 @@ window.__ModuleLoader__.load({
           setRole(data.role === 'chief' || data.role === 'worker' ? data.role : 'none')
           setInitialized(!!data.initialized)
           setInit(data.init || null)
+          setOpenBriefs(Number(data.openBriefs) || 0)
           initializedRef.current = !!data.initialized
         } catch {}
       }
@@ -115,6 +117,7 @@ window.__ModuleLoader__.load({
           const data = await res.json()
           setInit(data.init || null)
           setDiag(data.initialized ? '已初始化' : '已开始；在输入框输入 /sap-init')
+          await load()
         } catch { setDiag('init err') }
       }
 
@@ -131,6 +134,7 @@ window.__ModuleLoader__.load({
           })
           if (!res.ok) { setDiag('save ' + res.status); return }
           setDiag('saved')
+          await load()
         } catch { setDiag('save err') }
       }
 
@@ -149,11 +153,11 @@ window.__ModuleLoader__.load({
         color: on ? C.onText : C.text,
         opacity: 1,
       })
-      const hint = initialized
-        ? diag
-        : (init
+      const hint = !initialized
+        ? (init
             ? `第 ${Math.min(init.current + 1, init.total)}/${init.total} 问：${String(init.question || '').slice(0, 28)}${String(init.question || '').length > 28 ? '…' : ''} · /sap-init answer`
             : '未初始化 · 点击初始化或输入 /sap-init')
+        : (openBriefs > 0 ? `未决 brief ${openBriefs}` : (diag || '已就绪'))
 
       const roleButtons = ROLES.map((item) => h('button', {
         key: item.id,
