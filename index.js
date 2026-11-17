@@ -113,7 +113,7 @@ function protocolText(role, init) {
       '- 用 /sap-doctor 做文件级检查；它不证明方向正确或上下文未被污染。',
       '- brief 夹带日志/diff/stack trace 时：退回，要求一页方向问题。',
       '- 没有审批；不要写 approve/reject。note 是方向指导，不是授权。',
-      '- 当前会话被污染时：运行 /sap-clever 生成排污包，然后新建会话并 /sap-role chief。',
+      '- 当前会话被污染时：运行 /sap-clever 生成排污包，然后新建会话并在 SAP 角色条选择“总工”。',
     )
   } else {
     common.push(
@@ -145,7 +145,7 @@ function qingshenPrompt(role) {
       '写 notes/note-<id>.md；必要时更新 direction.md。',
       'brief 夹带操作细节时退回，要求一页方向问题。',
       '没有审批；不要写 approve/reject。',
-      '如果当前会话被污染：运行 /sap-clever，新建会话并 /sap-role chief。',
+      '如果当前会话被污染：运行 /sap-clever，新建会话并在 SAP 角色条选择“总工”。',
     ].join('\n')
   }
   return [
@@ -280,7 +280,7 @@ export function apply(ctx, _config = {}) {
             `- direction: ${result.direction}`,
             '- 当前会话已设为 chief（总工方向会话）。',
             '- 下一步：新建会话，在输入框上方的 SAP 角色条选择“工作”；它会获得 worker 协议。',
-            '- 需要把另一个会话设为总工时：/sap-role chief。',
+            '- 需要把另一个会话设为总工时：在新会话的 SAP 角色条选择“总工”。',
             '- 如果方向会话被污染：/sap-clever。',
           ].join('\n'))
         }
@@ -306,30 +306,6 @@ export function apply(ctx, _config = {}) {
         const started = await startInit(root, invocation.agent.id)
         await refreshProtocol(invocation.agent, true)
         return commandText(formatInitStatus(await initStatus(root)))
-      } catch (error) {
-        return commandError(error)
-      }
-    },
-  })
-
-  cmd({
-    name: 'sap-role',
-    description: '设置当前会话角色：chief（总工方向）或 worker（工作）',
-    input: { hint: 'chief | worker' },
-    recordInput: false,
-    async handler(invocation) {
-      try {
-        const args = splitArgs(invocation.rawInput)
-        const role = args[0]
-        if (!['none', 'chief', 'worker'].includes(role)) return commandError('用法：/sap-role none|chief|worker')
-        const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
-        const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
-        await ensureSkeleton(root)
-        await setRole(root, invocation.agent.id, role)
-        await refreshProtocol(invocation.agent, true)
-        return commandText(role === 'none'
-          ? '当前会话已设为无角色；它不参与 SAP，不注入协议。'
-          : `当前会话已设为 ${role}。新会话默认无角色；chief 只读 direction/briefs/notes。`)
       } catch (error) {
         return commandError(error)
       }
@@ -534,11 +510,11 @@ export function apply(ctx, _config = {}) {
         const cwd = invocation.agent?.session?.header?.cwd || process.cwd()
         const root = await rootForSession(ctx, sessionRoots, invocation.agent.id, cwd)
         const role = await getRole(root, invocation.agent.id)
-        if (role !== 'chief') return commandError('只有 chief 方向会话可以排污；先运行 /sap-role chief。')
+        if (role !== 'chief') return commandError('只有 chief 方向会话可以排污；请先在 SAP 角色条选择“总工”。')
         const result = await cleanse(root, invocation.agent.id)
         return commandText([
           `已生成排污包：${result.file}`,
-          '下一步：新建一个会话，运行 /sap-role chief；只读 direction/briefs/notes。',
+          '下一步：新建一个会话，在 SAP 角色条选择“总工”；只读 direction/briefs/notes。',
           '当前会话不要继续承载方向判断；不要粘贴旧日志/diff/复现。',
         ].join('\n'))
       } catch (error) {
@@ -727,7 +703,7 @@ function formatInitStatus(s) {
     return [
       '项目已初始化。',
       `- mode: ${s.state.mode}`,
-      '- 当前会话可用 /sap-role chief 设为总工；新会话默认无角色，用角色条选择。',
+      '- 当前会话可用 SAP 角色条设为总工；新会话默认无角色。',
       '- 查看状态：/sap-status',
     ].join('\n')
   }
@@ -753,6 +729,6 @@ function formatStatus(s, role) {
     `- .gitignore：${s.gitignore ? '已包含 .sap.local/' : '未包含 .sap.local/'}`,
     s.lastNote ? `- 最近 note：${s.lastNote}` : null,
     '',
-    '命令：/sap-init /sap-role /sap-brief /sap-brief-status /sap-note /sap-notes /sap-worklog /sap-doctor /sap-status /sap-export /sap-import /sap-clever /sap-qingshen',
+    '命令：/sap-init /sap-brief /sap-brief-status /sap-note /sap-notes /sap-worklog /sap-doctor /sap-status /sap-export /sap-import /sap-clever /sap-qingshen',
   ].filter(Boolean).join('\n')
 }

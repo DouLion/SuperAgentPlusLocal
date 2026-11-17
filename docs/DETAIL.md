@@ -10,7 +10,6 @@
 |---|---|
 | `/sap-init` | 多轮初始化：新项目 / 已有项目；回答完问题后 `finalize` 生成 `direction.md`、`charter.md`、模板与角色 |
 | `/sap-init answer <回答>` | 回答当前问题；`/sap-init status` 看进度 |
-| `/sap-role none\|chief\|worker` | 设置当前会话角色；新会话默认“无角色”，不参与 SAP |
 | `/sap-brief <一句话问题>` | worker 写一页方向 brief；`from <path>` 从文件导入 |
 | `/sap-brief-status <brief-id> <open\|resolved>` | 更新 brief 状态 |
 | `/sap-note <brief-id> <方向判断>` | chief 写方向 note（不是审批）；`from <path>` 从文件导入 |
@@ -30,6 +29,7 @@
 `SAP  [无角色] [总工] [工作]   saved`
 
 - 默认 **无角色**：该会话不注入协议、不参与 SAP。
+- 角色只通过角色条按钮切换；不提供 `/sap-role` 命令。
 - 选择“总工/工作”后，host 把角色写入 `.sap.local/sessions/<session-id>.json`，并按角色注入 section。
 - 角色按会话记住；切回“无角色”会移除 section。
 - 未初始化时显示“初始化”按钮；点击开始/继续问答，然后在输入框用 `/sap-init answer <回答>` 完成。

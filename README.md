@@ -38,7 +38,6 @@
 | `/sap-init new` / `existing` | 指定初始化模式 |
 | `/sap-init answer <回答>` | 多轮回答当前问题 |
 | `/sap-init status` / `finalize` | 查看进度 / 生成方向文件并完成 |
-| `/sap-role none\|chief\|worker` | 设置当前会话角色 |
 | `/sap-brief <问题>` / `from <path>` | worker 写一页方向 brief，或从文件导入 |
 | `/sap-brief-status <id> <open\|resolved>` | 更新 brief 状态 |
 | `/sap-note <brief-id> <判断>` / `from <path>` | chief 写方向 note（不是审批） |
@@ -96,7 +95,7 @@
 node --test test/*.test.js
 ```
 
-当前版本：`0.1.5`。
+当前版本：`0.2.0`。
 
 ## License
 

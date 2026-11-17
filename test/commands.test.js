@@ -132,20 +132,13 @@ test('qingshen mode writer adds SAP modes and backs up', async () => {
   }
 })
 
-test('worker role refreshes protocol section', async () => {
-  const root = await tempRoot()
-  const { commands, sections, agent } = makeHarness(root)
-  await commands.get('sap-role').handler({ agent, rawInput: 'worker' })
-  assert.ok(sections.some((section) => section.text.includes('工作会话')))
-  await fs.rm(root, { recursive: true, force: true })
-})
-
 test('command surface covers init/export/import/clever and injects chief protocol', async () => {
   const root = await tempRoot()
   const { commands, sections, agent } = makeHarness(root)
-  for (const name of ['sap-init', 'sap-export', 'sap-import', 'sap-clever', 'sap-role', 'sap-brief', 'sap-note', 'sap-status']) {
+  for (const name of ['sap-init', 'sap-export', 'sap-import', 'sap-clever', 'sap-brief', 'sap-note', 'sap-status']) {
     assert.ok(commands.has(name), `missing ${name}`)
   }
+  assert.equal(commands.has('sap-role'), false)
   const init = commands.get('sap-init')
   let result = await init.handler({ agent, rawInput: '' })
   assert.equal(result.kind, 'success')
