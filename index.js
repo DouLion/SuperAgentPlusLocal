@@ -782,6 +782,252 @@ export function apply(ctx, _config = {}) {
     })
     if (typeof ctx.effect === 'function') ctx.effect(() => disposeInitRoute, 'sap-local: init route')
     else disposers.push(disposeInitRoute)
+
+    const addRoute = (routePath, handler) => {
+      const dispose = webServer.register({ kind: 'exact', path: routePath, handler })
+      if (typeof ctx.effect === 'function') ctx.effect(() => dispose, `sap-local: ${routePath}`)
+      else disposers.push(dispose)
+    }
+    const sendError = (send, error) => {
+      const status = error && error.status ? error.status : 500
+      send(status, { ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
+    const resolveRoot = async (sid, cwd) => {
+      const root = await rootForSession(ctx, sessionRoots, sid, cwd || '', { strict: true })
+      if (!root) throw Object.assign(new Error('cannot-resolve-root'), { status: 409 })
+      if (!(await exists(path.join(root, '.sap.local')))) {
+        throw Object.assign(new Error('not-initialized'), { status: 409 })
+      }
+      sessionRoots.set(sid, root)
+      return root
+    }
+    const requireChief = async (root, sid) => {
+      if ((await getRole(root, sid)) !== 'chief') {
+        throw Object.assign(new Error('chief-role-required'), { status: 409 })
+      }
+    }
+    const initView = (state) => {
+      const question = state.questions[Math.min(state.current, state.questions.length - 1)]
+      return {
+        phase: state.phase,
+        current: Math.min(state.current, state.questions.length),
+        total: state.questions.length,
+        question: question?.text || '',
+        answer: question ? String(state.answers[question.id] || '') : '',
+        prefilled: Boolean(state.prefilled),
+        reinit_from: state.reinit_from || null,
+        previous_direction: state.previous_direction || null,
+      }
+    }
+    const readSession = async (req) => {
+      const body = await readBody(req)
+      const sid = typeof body.sessionId === 'string' ? body.sessionId : ''
+      if (!sid) throw Object.assign(new Error('sessionId required'), { status: 400 })
+      return { body, sid, cwd: typeof body.cwd === 'string' ? body.cwd : '' }
+    }
+
+    addRoute('/sap-local/overview', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'GET' && req.method !== 'HEAD') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const url = new URL(req.url, 'http://localhost')
+        const sid = url.searchParams.get('sessionId') || ''
+        const root = await resolveRoot(sid, url.searchParams.get('cwd') || '')
+        const options = chiefOptions(ctx)
+        const initState = await readJson(sapPaths(root).init, null)
+        const briefs = await listBriefs(root)
+        const notes = await listNotes(root)
+        send(200, {
+          ok: true,
+          role: await getRole(root, sid),
+          initialized: (await readJson(sapPaths(root).state, null))?.initialized === true,
+          init: initState && initState.phase !== 'done' ? initView(initState) : null,
+          chief: chiefStatus(await readChief(root), options.liveIds, options.hostPid),
+          status: await status(root, options),
+          doctor: await doctor(root, sid, options),
+          briefs: briefs.map((b) => ({ id: b.id, status: b.status, title: b.title })),
+          notes: notes.slice(-10).reverse().map((n) => ({ id: n.id, brief: n.brief, title: n.title })),
+        })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
+
+    addRoute('/sap-local/init-start', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'POST' && req.method !== 'PUT') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const { body, sid, cwd } = await readSession(req)
+        const root = await resolveRoot(sid, cwd)
+        await ensureSkeleton(root)
+        await requireChief(root, sid)
+        await setChief(root, sid, chiefOptions(ctx))
+        const started = await startInit(root, sid)
+        send(200, { ok: true, init: initView(started.state) })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
+
+    addRoute('/sap-local/init-answer', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'POST' && req.method !== 'PUT') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const { body, sid, cwd } = await readSession(req)
+        const root = await resolveRoot(sid, cwd)
+        await requireChief(root, sid)
+        const state = await answerInit(root, typeof body.answer === 'string' ? body.answer : '')
+        send(200, { ok: true, init: initView(state.state) })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
+
+    addRoute('/sap-local/init-finalize', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'POST' && req.method !== 'PUT') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const { sid, cwd } = await readSession(req)
+        const root = await resolveRoot(sid, cwd)
+        await requireChief(root, sid)
+        await finalizeInit(root, sid, chiefOptions(ctx))
+        const agent = sessionAgents.get(sid)
+        if (agent) await refreshProtocol(agent, true)
+        send(200, { ok: true, initialized: true })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
+
+    addRoute('/sap-local/init-reinit', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'POST' && req.method !== 'PUT') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const { sid, cwd } = await readSession(req)
+        const root = await resolveRoot(sid, cwd)
+        await requireChief(root, sid)
+        const result = await reinitProject(root, sid, chiefOptions(ctx))
+        await refreshProtocol(sessionAgents.get(sid), true)
+        send(200, { ok: true, init: initView(result.state), archive: result.archive })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
+
+    addRoute('/sap-local/brief', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'POST' && req.method !== 'PUT') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const { body, sid, cwd } = await readSession(req)
+        const root = await resolveRoot(sid, cwd)
+        const result = await createBrief(root, sid, typeof body.question === 'string' ? body.question : '')
+        send(200, { ok: true, id: result.id, file: result.file, warning: result.warning })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
+
+    addRoute('/sap-local/brief-status', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'POST' && req.method !== 'PUT') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const { body, sid, cwd } = await readSession(req)
+        const root = await resolveRoot(sid, cwd)
+        const result = await setBriefStatus(root, String(body.id || ''), String(body.status || ''))
+        send(200, { ok: true, id: result.id, status: result.status })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
+
+    addRoute('/sap-local/note', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'POST' && req.method !== 'PUT') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const { body, sid, cwd } = await readSession(req)
+        const root = await resolveRoot(sid, cwd)
+        const result = await createNote(root, sid, String(body.briefId || ''), typeof body.conclusion === 'string' ? body.conclusion : '')
+        send(200, { ok: true, id: result.id, file: result.file })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
+
+    addRoute('/sap-local/worklog', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'POST' && req.method !== 'PUT') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const { body, sid, cwd } = await readSession(req)
+        const root = await resolveRoot(sid, cwd)
+        const result = await appendWorkLog(root, sid, typeof body.text === 'string' ? body.text : '')
+        send(200, { ok: true, file: result.file })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
+
+    addRoute('/sap-local/chief', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'POST' && req.method !== 'PUT') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const { body, sid, cwd } = await readSession(req)
+        const root = await resolveRoot(sid, cwd)
+        const action = body.action === 'takeover' ? 'takeover' : 'status'
+        const chief = chiefStatus(await readChief(root), liveAgentIds(ctx), process.pid)
+        if (action === 'status') {
+          send(200, { ok: true, chief })
+          return
+        }
+        await setChief(root, sid, chiefOptions(ctx))
+        const agent = sessionAgents.get(sid)
+        if (agent) await refreshProtocol(agent, true)
+        send(200, { ok: true, chief: chiefStatus(await readChief(root), liveAgentIds(ctx), process.pid) })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
+
+    addRoute('/sap-local/export', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'POST' && req.method !== 'PUT') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const { sid, cwd } = await readSession(req)
+        const root = await resolveRoot(sid, cwd)
+        const result = await exportBundle(root, null)
+        send(200, { ok: true, path: result.path, files: result.files, bytes: result.bytes })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
+
+    addRoute('/sap-local/import', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'POST' && req.method !== 'PUT') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const { body, sid, cwd } = await readSession(req)
+        const root = await resolveRoot(sid, cwd)
+        const bundlePath = typeof body.path === 'string' ? body.path : ''
+        if (!bundlePath) throw Object.assign(new Error('bundle path required'), { status: 400 })
+        const result = await importBundle(root, bundlePath, { replace: body.replace === true })
+        send(200, { ok: true, imported: result.imported, backup: result.backup })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
+
+    addRoute('/sap-local/cleanse', async (req, res) => {
+      const send = jsonSender(res)
+      try {
+        if (req.method !== 'POST' && req.method !== 'PUT') throw Object.assign(new Error('method-not-allowed'), { status: 405 })
+        const { sid, cwd } = await readSession(req)
+        const root = await resolveRoot(sid, cwd)
+        await requireChief(root, sid)
+        const result = await cleanse(root, sid)
+        send(200, { ok: true, id: result.id, file: result.file })
+      } catch (error) {
+        sendError(send, error)
+      }
+    })
   }
   ensureRoutes()
   try { ctx.inject(['webServer'], () => ensureRoutes()) } catch {}

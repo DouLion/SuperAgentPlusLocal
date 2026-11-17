@@ -24,19 +24,18 @@
 | `/sap-clever` | chief 排污：生成方向摘要包，建议新建会话继续 |
 | `/sap-qingshen` | 可选：把 SAP 总工/工作协议写入本机 `dsh-qingshen/modes.json` |
 
-## 角色条
+## 操作条（composer 上方）
 
-插件在输入框上方（`conversation.input.dock`）显示：
+插件在输入框上方渲染 SAP 操作条：
 
-`SAP  [无角色] [总工] [工作]   saved`
+`SAP  [无角色] [总工] [工作]  [初始化] [重新共识] [写 Brief] [写 Note] [工作日志] [状态] [医生] [总工] [导出] [排污]`
 
 - 默认 **无角色**：该会话不注入协议、不参与 SAP。
-- 角色只通过角色条按钮切换；不提供 `/sap-role` 命令。
+- 角色只通过操作条按钮切换；不提供 `/sap-role` 命令。
 - 未初始化时先选 **总工**，才会出现“初始化”按钮；worker/无角色不能初始化。
-- 选择“总工/工作”后，host 把角色写入 `.sap.local/sessions/<session-id>.json`，并按角色注入 section。
-- 角色按会话记住；切回“无角色”会移除 section。
-- 未初始化时显示“初始化”按钮；点击开始/继续问答，然后在输入框用 `/sap-init answer <回答>` 完成。
-- 数据通路：`GET/PUT /sap-local/role`；`POST /sap-local/init` 启动初始化。host 用 webServer 注册。
+- 点击操作按钮打开面板，表单提交后**必须在面板中显示成功或失败回执**；失败显示 host 返回的 error。
+- 面板覆盖：初始化/重新共识、写 Brief、写 Note、工作日志、状态、医生、总工接管、导出/导入、排污。
+- 数据通路：`GET /sap-local/overview`、`GET/PUT /sap-local/role`、`POST /sap-local/init-*`、`POST /sap-local/brief`、`POST /sap-local/note`、`POST /sap-local/worklog`、`POST /sap-local/chief`、`POST /sap-local/export`、`POST /sap-local/import`、`POST /sap-local/cleanse`。
 
 ## brief / note / worklog
 

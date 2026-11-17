@@ -267,6 +267,63 @@ test('sap-chief reports status and allows takeover when offline', async () => {
   await fs.rm(root, { recursive: true, force: true })
 })
 
+test('operation routes cover brief note worklog chief export cleanse', async () => {
+  const root = await tempRoot()
+  const routes = []
+  const webServer = {
+    register(definition) {
+      routes.push(definition)
+      return () => {}
+    },
+  }
+  const { commands, agent } = makeHarness(root, webServer)
+  await makeChief(root, agent)
+  const init = commands.get('sap-init')
+  await init.handler({ agent, rawInput: '' })
+  for (const answer of ['目标', '重点', '非目标', '约束', '取舍', '停']) {
+    await init.handler({ agent, rawInput: `answer ${answer}` })
+  }
+  await init.handler({ agent, rawInput: 'finalize' })
+  const route = (path) => routes.find((item) => item.path === path)
+  const post = async (path, body) => {
+    const exchange = fakeExchange('POST', path, { sessionId: agent.id, cwd: root, ...body })
+    await route(path).handler(exchange.req, exchange.res)
+    return exchange
+  }
+
+  let exchange = fakeExchange('GET', `/sap-local/overview?sessionId=${encodeURIComponent(agent.id)}&cwd=${encodeURIComponent(root)}`)
+  await route('/sap-local/overview').handler(exchange.req, exchange.res)
+  assert.equal(exchange.status, 200)
+  assert.equal(exchange.json.ok, true)
+  assert.equal(exchange.json.role, 'chief')
+
+  exchange = await post('/sap-local/brief', { question: '是否调整公共接口？' })
+  assert.equal(exchange.status, 200)
+  assert.equal(exchange.json.ok, true)
+  const briefId = exchange.json.id
+
+  exchange = await post('/sap-local/note', { briefId, conclusion: '保持兼容' })
+  assert.equal(exchange.status, 200)
+  assert.equal(exchange.json.ok, true)
+
+  exchange = await post('/sap-local/worklog', { text: '完成接口检查' })
+  assert.equal(exchange.status, 200)
+  assert.equal(exchange.json.ok, true)
+
+  exchange = await post('/sap-local/chief', { action: 'status' })
+  assert.equal(exchange.status, 200)
+  assert.equal(exchange.json.chief.status === 'online' || exchange.json.chief.status === 'offline', true)
+
+  exchange = await post('/sap-local/export')
+  assert.equal(exchange.status, 200)
+  assert.ok(exchange.json.path)
+
+  exchange = await post('/sap-local/cleanse')
+  assert.equal(exchange.status, 200)
+  assert.ok(exchange.json.file)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 test('brief status, notes, worklog and doctor close the loop', async () => {
   const root = await tempRoot()
   const { commands, agent } = makeHarness(root)
