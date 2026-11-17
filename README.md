@@ -10,7 +10,7 @@
 
 - **角色条**：输入框上方显示 `SAP [无角色] [总工] [工作]`；默认 **无角色**。未初始化时先选“总工”才出现初始化按钮；选择按会话保存，并显示未决 brief 数。
 - **总工状态**：`.sap.local/chief.json` 记录唯一总工；总工离线/过期时角色条提示，`/sap-chief status` 查看、`/sap-chief takeover` 接管。
-- **`/sap-init`**：多轮问答初始化，区分新项目 / 已有项目；完成后生成 `direction.md`、`charter.md` 与模板。
+- **`/sap-init`**：多轮问答初始化，区分新项目 / 已有项目；`reinit` 用于旧项目重新共识，归档旧方向并保留 briefs/notes/work。
 - **`/sap-brief` / `/sap-note`**：一页 brief 与方向 note；支持 `from <path>` 导入、`open/resolved` 状态。
 - **`/sap-worklog`**：记录 `work/<session>/log.md`，总工不读、不导出。
 - **`/sap-doctor`**：文件级健康检查：方向、角色、gitignore、未决 brief、疑似污染。
@@ -37,7 +37,8 @@
 |---|---|
 | `/sap-init` | 开始/继续初始化；自动判断新项目/已有项目 |
 | `/sap-init new` / `existing` | 指定初始化模式 |
-| `/sap-init answer <回答>` | 多轮回答当前问题 |
+| `/sap-init reinit` | 旧项目重新共识：归档旧方向，保留 briefs/notes/work，预填旧答案 |
+| `/sap-init answer <回答>` | 多轮回答；留空则确认预填 |
 | `/sap-init status` / `finalize` | 查看进度 / 生成方向文件并完成；只有总工可初始化 |
 | `/sap-chief status\|takeover` | 查看总工状态 / 接管总工 |
 | `/sap-brief <问题>` / `from <path>` | worker 写一页方向 brief，或从文件导入 |
@@ -98,7 +99,7 @@
 node --test test/*.test.js
 ```
 
-当前版本：`0.3.0`。
+当前版本：`0.4.0`。
 
 ## License
 

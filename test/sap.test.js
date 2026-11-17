@@ -24,7 +24,9 @@ import {
   listNotes,
   parseFrontmatter,
   readChief,
+  readJson,
   readText,
+  reinitProject,
   sapPaths,
   setBriefStatus,
   setChief,
@@ -168,5 +170,35 @@ test('chief record enforces one online chief and detects offline/stale', async (
 
   await clearChief(root, 'sess-other')
   assert.equal(await readChief(root), null)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('reinit archives old direction and preserves briefs notes work', async () => {
+  const root = await tempProject('reinit')
+  await startInit(root, 'sess-chief', 'new')
+  for (const answer of ['目标', '重点', '非目标', '约束', '取舍', '停']) await answerInit(root, answer)
+  await finalizeInit(root, 'sess-chief')
+  await createBrief(root, 'sess-worker', '旧方向下的问题')
+  await createNote(root, 'sess-chief', 'brief-x', '旧方向判断')
+  await appendWorkLog(root, 'sess-worker', '旧工作记录')
+
+  const result = await reinitProject(root, 'sess-chief', { liveIds: ['sess-chief'] })
+  assert.ok(await fs.stat(result.archive))
+  assert.ok(await fs.stat(path.join(result.archive, 'direction.md')))
+  assert.equal((await listBriefs(root)).length, 1)
+  assert.equal((await listNotes(root)).length, 1)
+  assert.equal(await countWorkLogs(root), 1)
+  assert.equal(result.state.mode, 'existing')
+  assert.equal(result.state.prefilled, true)
+  assert.ok(result.state.answers.q1)
+
+  await answerInit(root, '新现状')
+  assert.equal((await readJson(path.join(sapPaths(root).init), null)).current, 1)
+  for (const answer of ['新重点', '新非目标', '新约束', '新取舍', '新停']) {
+    await answerInit(root, answer)
+  }
+  await finalizeInit(root, 'sess-chief', { liveIds: ['sess-chief'] })
+  assert.match(await readText(sapPaths(root).direction), /新现状/)
+  assert.ok(await fs.stat(path.join(result.archive, 'direction.md')))
   await fs.rm(root, { recursive: true, force: true })
 })

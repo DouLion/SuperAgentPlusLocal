@@ -62,6 +62,7 @@
 
 - **新项目**：`/sap-init` 自动判断；回答 6 个问题（目标、当前重点、非目标、约束、取舍原则、暂停信号）。
 - **已有项目**：`/sap-init existing`；问题偏向现状、已有结构、已生效决策、风险、近期目标、复核触发。
+- **重新共识**：`/sap-init reinit`；归档旧 `direction.md/init.json/state.json/chief.json` 到 `archive/reinit-*`，保留 `briefs/notes/work/sessions`，并把旧方向答案按顺序预填。
 - **只有总工方向会话可以初始化**；无角色/工作会话会被拒绝。`finalize` 前不要开其他会话正式推进；完成后当前会话是 chief。
 
 ## 目录

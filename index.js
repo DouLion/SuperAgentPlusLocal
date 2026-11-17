@@ -23,6 +23,7 @@ import {
   readChief,
   readJson,
   readText,
+  reinitProject,
   setBriefStatus,
   setChief,
   setRole,
@@ -280,7 +281,7 @@ export function apply(ctx, _config = {}) {
         const args = splitArgs(invocation.rawInput)
         const action = args[0] || ''
         const initialized = (await readJson(sapPaths(root).state, null))?.initialized === true
-        const mutating = ['', 'new', 'existing', 'answer', 'finalize'].includes(action)
+        const mutating = ['', 'new', 'existing', 'reinit', 'answer', 'finalize'].includes(action)
         if (mutating && !initialized && (await getRole(root, invocation.agent.id)) !== 'chief') {
           return commandError('只有总工方向会话可以初始化；请先在 SAP 角色条选择“总工”。')
         }
@@ -290,7 +291,8 @@ export function apply(ctx, _config = {}) {
             '/sap-init                 开始/继续初始化',
             '/sap-init new             按新项目初始化',
             '/sap-init existing        按已有项目初始化',
-            '/sap-init answer <回答>   回答当前问题',
+            '/sap-init reinit          重新共识（归档旧方向，保留 briefs/notes/work）',
+            '/sap-init answer <回答>   回答当前问题；留空则确认预填',
             '/sap-init status          查看进度',
             '/sap-init finalize        生成 direction.md/charter 并完成',
           ].join('\n'))
@@ -301,7 +303,6 @@ export function apply(ctx, _config = {}) {
           return commandText(formatInitStatus(s))
         }
         if (action === 'answer') {
-          if (args.length < 2) return commandError('请提供回答：/sap-init answer <回答>')
           const result = await answerInit(root, args.slice(1).join(' '))
           await refreshProtocol(invocation.agent, true)
           const s = await initStatus(root)
@@ -319,10 +320,21 @@ export function apply(ctx, _config = {}) {
             '- 如果方向会话被污染：/sap-clever。',
           ].join('\n'))
         }
+        if (action === 'reinit') {
+          const result = await reinitProject(root, invocation.agent.id, chiefOptions(ctx))
+          await refreshProtocol(invocation.agent, true)
+          return commandText([
+            '已开始重新共识。',
+            `- 旧方向归档：${result.archive}`,
+            '- 已保留：briefs/notes/work/sessions；旧 direction 作为预填基线。',
+            '- 当前问题已预填，可 /sap-init answer 确认，或 /sap-init answer <新回答> 修改。',
+            '- 完成后：/sap-init finalize。',
+          ].join('\n'))
+        }
         if (action === 'new' || action === 'existing') {
           const s = await initStatus(root)
           if (s.initialized && s.state?.phase === 'done') {
-            return commandError('项目已初始化；如需重新初始化，请先手动归档/删除 .sap.local/init.json 与 direction.md')
+            return commandError('项目已初始化；请用 /sap-init reinit 重新共识（会归档旧方向并保留 briefs/notes/work）')
           }
           const started = await startInit(root, invocation.agent.id, action)
           await refreshProtocol(invocation.agent, true)
@@ -824,12 +836,17 @@ function formatInitStatus(s) {
   const q = s.question
   return [
     `SAP 初始化（${s.state.mode === 'existing' ? '已有项目' : '新项目'}）`,
+    s.state.reinit_from ? `重新共识：${s.state.reinit_from}；旧方向见 ${s.state.previous_direction || '归档目录'}` : null,
     `进度：${s.progress}`,
     q ? `当前问题：${q.text}` : '所有问题已回答，运行 /sap-init finalize 生成 direction.md。',
     '',
-    q ? '回答：/sap-init answer <你的回答>' : '完成：/sap-init finalize',
+    q
+      ? (s.state.prefilled && s.state.answers[q.id]
+          ? '已预填：/sap-init answer 确认，或 /sap-init answer <新回答> 修改'
+          : '回答：/sap-init answer <你的回答>')
+      : '完成：/sap-init finalize',
     '查看：/sap-init status；帮助：/sap-init help',
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 function formatStatus(s, role) {
